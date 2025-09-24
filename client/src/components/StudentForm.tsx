@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import axios from 'axios';
 import { Save, Loader, User, Mail, Phone, Calendar, MapPin, Book, Key } from 'lucide-react';
+import { encryptObject } from '../utils/crypto';
 
 const initial = {
   fullName: '',
@@ -35,7 +36,10 @@ export default function StudentForm({ apiBase }: { apiBase: string }) {
     setMessage('');
 
     try {
-      await axios.post(apiBase + '/register', form);
+      // Encrypt each field individually before sending
+      const encryptedData = encryptObject(form);
+      
+      await axios.post(apiBase + '/register', encryptedData);
       setMessage('Student registered successfully!');
       setMessageType('success');
       setForm(initial);

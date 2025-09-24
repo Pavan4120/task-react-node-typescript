@@ -15,16 +15,19 @@ function safeParse(jsonStr: string) {
 
 /**
  * Register a student
- * - Accepts raw JSON fields in body
- * - Server encrypts entire payload before saving
+ * - Accepts encrypted field-by-field data
+ * - Server encrypts entire payload again before saving (double encryption)
  */
 export const registerStudent = async (req: Request, res: Response) => {
   try {
-    const bodyCopy = { ...req.body };
-    delete bodyCopy._id; // remove accidental ID
-    const payloadStr = JSON.stringify(bodyCopy);
-
+    // The incoming data is already field-by-field encrypted from frontend
+    const encryptedFields = { ...req.body };
+    delete encryptedFields._id; // remove accidental ID
+    
+    // Server encrypts the entire encrypted fields object again
+    const payloadStr = JSON.stringify(encryptedFields);
     const wrapped = serverEncrypt(payloadStr);
+    
     const student = new Student({ encryptedData: wrapped });
     await student.save();
 
@@ -48,10 +51,20 @@ export const loginStudent = async (req: Request, res: Response) => {
 
     for (const s of students) {
       try {
-        const decrypted = serverDecrypt(s.encryptedData);
-        const data = safeParse(decrypted);
-        if (data && data.email === email && data.password === password) {
-          return res.json({ message: 'Login successful', id: s._id });
+        // First decrypt server-layer encryption
+        const serverDecrypted = serverDecrypt(s.encryptedData);
+        const encryptedFields = safeParse(serverDecrypted);
+        
+        if (encryptedFields) {
+          // The fields are still encrypted with client key at this point
+          // For login, we need to compare the encrypted values
+          // Since we can't decrypt client-side encryption on server, we'll compare the encrypted versions
+          const encryptedEmail = encryptField(email); // We need a helper to encrypt on server for comparison
+          const encryptedPassword = encryptField(password);
+          
+          if (encryptedFields.email === encryptedEmail && encryptedFields.password === encryptedPassword) {
+            return res.json({ message: 'Login successful', id: s._id });
+          }
         }
       } catch {
         continue;
@@ -67,17 +80,21 @@ export const loginStudent = async (req: Request, res: Response) => {
 
 /**
  * Get all students
- * - Decrypt server-layer
- * - Return as JSON (no client encryption)
+ * - Decrypt server-layer encryption
+ * - Return field-by-field encrypted data to frontend (frontend will decrypt each field)
  */
 export const getStudents = async (req: Request, res: Response) => {
   try {
     const students = await Student.find().sort({ createdAt: -1 }).limit(100);
     const result = students.map(s => {
       try {
-        const decrypted = serverDecrypt(s.encryptedData);
-        const data = safeParse(decrypted);
-        return { id: s._id, ...data };
+        // Decrypt server-layer encryption
+        const serverDecrypted = serverDecrypt(s.encryptedData);
+        const encryptedFields = safeParse(serverDecrypted);
+        
+        // Return the field-by-field encrypted data + ID
+        // Frontend will decrypt each field individually
+        return { id: s._id, ...encryptedFields };
       } catch {
         return { id: s._id, error: 'decrypt_failed' };
       }
@@ -91,16 +108,17 @@ export const getStudents = async (req: Request, res: Response) => {
 
 /**
  * Update a student
- * - Accepts raw JSON fields
- * - Server encrypts before saving
+ * - Accepts field-by-field encrypted data
+ * - Server encrypts again before saving
  */
 export const updateStudent = async (req: Request, res: Response) => {
   try {
     const { id } = req.params;
-    const bodyCopy = { ...req.body };
-    delete bodyCopy._id;
+    const encryptedFields = { ...req.body };
+    delete encryptedFields._id;
 
-    const payloadStr = JSON.stringify(bodyCopy);
+    // Server encrypts the entire encrypted fields object again
+    const payloadStr = JSON.stringify(encryptedFields);
     const wrapped = serverEncrypt(payloadStr);
 
     const updated = await Student.findByIdAndUpdate(id, { encryptedData: wrapped }, { new: true });
@@ -128,3 +146,4 @@ export const deleteStudent = async (req: Request, res: Response) => {
     res.status(500).json({ message: err.message || 'Server error' });
   }
 };
+

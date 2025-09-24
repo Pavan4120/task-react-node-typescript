@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import axios from 'axios';
 import { Loader, Trash2, Edit3, User, Mail, Book, AlertCircle, RefreshCw, Phone } from 'lucide-react';
 import { Modal, Button, Form } from 'react-bootstrap';
+import { decryptObject, encryptObject } from '../utils/crypto';
 
 export default function StudentList({ apiBase }: { apiBase: string }) {
   const [items, setItems] = useState<any[]>([]);
@@ -28,7 +29,19 @@ export default function StudentList({ apiBase }: { apiBase: string }) {
     setMessage('');
     try {
       const res = await axios.get(apiBase + '/students');
-      setItems(res.data);
+      
+      // Decrypt each student's data field by field
+      const decryptedStudents = res.data.map((student: any) => {
+        try {
+          const decryptedData = decryptObject(student);
+          return { id: student.id, ...decryptedData };
+        } catch (error) {
+          console.error('Error decrypting student:', error);
+          return { id: student.id, error: 'decrypt_failed', ...student };
+        }
+      });
+      
+      setItems(decryptedStudents);
     } catch (err: any) {
       setMessage(err?.response?.data?.message || err.message || 'Failed to load students');
     } finally {
@@ -72,7 +85,10 @@ export default function StudentList({ apiBase }: { apiBase: string }) {
 
   async function saveChanges() {
     try {
-      await axios.put(apiBase + '/student/' + editingStudent.id, formData);
+      // Encrypt each field individually before sending
+      const encryptedData = encryptObject(formData);
+      
+      await axios.put(apiBase + '/student/' + editingStudent.id, encryptedData);
       setMessage('Student updated successfully');
       setShowModal(false);
       load();
